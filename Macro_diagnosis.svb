@@ -1,0 +1,50 @@
+'#Reference {BE35B7EB-0D00-44D8-B3A5-0727DF5AD7C1}#1.0#0#
+'#Reference {C9E29001-3D45-11D4-9FF4-00C04FA0D540}#1.0#0#
+'#Language "WWB-COM"
+
+Option Explicit
+
+Sub Main
+    Dim wb As Workbook
+    Dim first_item As Object
+
+    ' Назначаем переменной текущую открытую книгу
+    Set wb = ActiveWorkbook
+
+    ' Простая проверка: если ничего не открыто, макрос выдаст сообщение и остановится
+    If wb Is Nothing Then
+        MsgBox "Нет активной книги (Workbook)! Откройте .stw файл."
+        Exit Sub
+    End If
+
+    ' Сообщим пользователю название файла, чтобы убедиться, что всё работает
+    MsgBox "Processing: " & wb.Name
+
+	Set first_item = wb.Root.Child
+	MsgBox "Item name: " & first_item.Name & first_item.Type
+	ProcessItem(first_item)
+
+End Sub
+
+Sub ProcessItem(ByVal item As WorkbookItem)
+	While TypeName(item) <> "Nothing"
+		If item.Type = 0 Then
+			MsgBox "Folder: " & item.Name
+			ProcessItem(item.Child)
+		End If
+
+		If item.Type = 1 Then
+			MsgBox "Table: " & item.Name
+		End If
+
+		Set item = item.Next
+	Wend
+End Sub
+
+'STATISTICA MACRO FILE VERSION 4
+'BEGINPROPERTIES
+'NAME=Macro_diagnosis
+'DESCRIPTION=
+'LANGUAGE=0
+'SCRIPTING=0
+'ENDPROPERTIES
