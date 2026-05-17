@@ -1,0 +1,222 @@
+Option Base 1
+Option Explicit
+'#Uses "*STB.SVX"
+'#Uses "*GRAPHICS.SVX"
+
+Public Const MANN_WHITNEY As String = "Mann-Whitney"
+Public Const DESIGN As String = "Дизайн"
+Public Const RES_NPAR As String = "Результат npar"
+Public Const RES_PRISM As String = "Результаты prism"
+
+Sub Main
+	Dim ExcelApp As Object
+	Set ExcelApp = CreateObject("Excel.Application")
+	ExcelApp.Visible = False
+
+	Dim wb As Object
+	Set wb = ExcelApp.Workbooks.Add
+
+	wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count)).Name = MANN_WHITNEY
+	wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count)).Name = RES_NPAR
+
+	If wb.Worksheets.Count > 1 Then
+		wb.Worksheets(1).Delete
+	End If
+
+	Dim wbs As Workbook
+	Dim folderPath As String
+	Dim fileName As String
+
+	Dim tabCounter As Integer
+	tabCounter = 1
+
+	Dim lastDot As Integer
+	lastDot = 0
+
+	folderPath = "C:\Work\MacroLab\"
+	folderPath = InputBox("Введите путь к файлу:") & "\"
+	If folderPath = "" Then Exit Sub
+	If Dir(folderPath, vbDirectory) = "" Then
+		MsgBox "Ошибка: Указанная папка " & folderPath & " не существует"
+		Exit Sub
+	End If
+
+	fileName = InputBox("Введите имя файла:")
+	fileName = Dir(folderPath & fileName & "*.stw")
+	If fileName = "" Then
+		MsgBox "Ошибка: Указанный файл " & fileName & " не существует"
+		Exit Sub
+	End If
+
+	Set wbs = Workbooks.Open(folderPath & fileName)
+	TreeRound wbs.Root.Child, wb, tabCounter
+
+	ExcelApp.DisplayAlerts = False
+
+	lastDot = InStrRev(fileName, ".")
+	fileName = Left(fileName, lastDot - 1)
+	wb.SaveAs folderPath & fileName & ".xlsx"
+	wb.Close
+	ExcelApp.DisplayAlerts = True
+	ExcelApp.Quit
+	Set wb = Nothing
+	Set ExcelApp = Nothing
+End Sub
+
+Sub TreeRound(ByVal currItem As WorkbookItem, ByRef wb As Object, tabCounter As Integer)
+	Dim spSheet As Spreadsheet
+	Dim wSheet As Object
+	Dim sheetName As String
+	While Not currItem Is Nothing
+		If currItem.Type = 1 Then
+			If InStr(currItem.Name, MANN_WHITNEY) > 0 Then
+				AppendNextToSingleSheet currItem, wb, MANN_WHITNEY
+			ElseIf InStr(currItem.Name, "Descriptive Statistics (ДИМ, с (с вылетами)") > 0 Then
+				ExtractFull currItem, wb, RES_NPAR
+			ElseIf Trim(currItem.Name) = "Сравнение групп (с вылетами)" Then
+				ExtractFull currItem, wb, RES_NPAR
+				ExtractAndSortGroups currItem, wb, RES_NPAR
+			Else
+				Set spSheet = currItem.Object
+				spSheet.SelectAll
+				spSheet.CopyWithHeaders
+
+				Set wSheet = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
+				sheetName = CleanSheetName(Left(currItem.Name, 31))
+
+				On Error Resume Next
+				wSheet.Name = sheetName
+
+				If Err.Number <> 0 Then
+					Err.Clear
+					wSheet.Name = Left(sheetName, 27) & "_" & tabCounter
+					tabCounter = tabCounter + 1
+				End If
+
+				On Error GoTo 0
+
+				wSheet.Paste
+			End If
+		End If
+		If Not currItem.Child Is Nothing Then
+			TreeRound currItem.Child, wb, tabCounter
+		End If
+		Set currItem = currItem.Next
+	Wend
+
+End Sub
+
+Function CleanSheetName(ByVal sheetName As String) As String
+	Dim errChars As Variant
+	errChars = Array("/", "\", "*", "?", ":", "[", "]")
+	Dim i As Integer
+
+	CleanSheetName = sheetName
+	For i = LBound(errChars) To UBound(errChars)
+		CleanSheetName = Replace(CleanSheetName, errChars(i), "_")
+	Next i
+End Function
+
+Sub AppendNextToSingleSheet(ByVal currItem As WorkbookItem, ByRef wb As Object, ByVal targetSheetName As String)
+	Dim spSheet As Spreadsheet
+	Set spSheet = currItem.Object
+
+	Dim targetSheet As Object
+	Set targetSheet = wb.Worksheets(targetSheetName)
+	targetSheet.Activate
+
+
+	spSheet.SelectAll
+	If targetSheet.Cells(1,2).Value = "" Then
+		spSheet.CopyWithHeaders
+		targetSheet.Cells(1,1).Select
+		targetSheet.Paste
+	Else
+		spSheet.CopyWithHeaders
+		Dim nextRow As Long
+		nextRow = targetSheet.Cells(targetSheet.Rows.Count, 2).End(-4162).Row + 1
+		targetSheet.Cells(nextRow, 1).Select
+		targetSheet.Paste
+		If currItem.Next Is Nothing Then
+			targetSheet.Cells(nextRow + 1, 1).Value = "Next"
+		End If
+	End If
+End Sub
+
+Sub ExtractAndSortGroups(ByVal currItem As WorkbookItem, ByRef wb As Object, ByVal targetSheetName As String)
+	Dim spSheet As Spreadsheet
+	Set spSheet = currItem.Object
+
+	Dim targetSheet As Object
+	Set targetSheet = wb.Worksheets(targetSheetName)
+
+	Dim i As Long, j As Long, nextRow As Long, freeSpace As Long
+	Dim groupName As String, currLabel As String
+	Dim currTargetCol As Integer
+	Dim sortRange As Object
+
+	freeSpace = targetSheet.Cells(targetSheet.Rows.Count, 2).End(-4162).Row + 1
+	nextRow = freeSpace + 2
+	currTargetCol = 1
+	groupName = ""
+
+	For i = 1 To spSheet.NumberOfCases
+		currLabel = spSheet.TextLabel(1,spSheet.Value(i,1))
+		If currLabel Like "Контроль*" Or currLabel Like "ШС*" Or currLabel Like "Милнаципран*" Then
+			If groupName <> currLabel Then
+				If groupName <> "" Then
+					Set sortRange = targetSheet.Range(targetSheet.Cells(freeSpace + 1, currTargetCol), targetSheet.Cells(nextRow - 1, currTargetCol))
+					targetSheet.Columns(currTargetCol).UnMerge
+					sortRange.Sort sortRange.Cells(1,1), 1
+				End If
+				groupName = spSheet.TextLabel(1,spSheet.Value(i,1))
+				currTargetCol = currTargetCol + 1
+				nextRow = freeSpace + 2
+				targetSheet.Cells(freeSpace, currTargetCol).Value = groupName
+			End If
+			targetSheet.Cells(nextRow, currTargetCol).Value = spSheet.Value(i, 2)
+			nextRow = nextRow + 1
+		End If
+	Next i
+	If groupName <> "" Then
+		Set sortRange = targetSheet.Range(targetSheet.Cells(freeSpace + 1, currTargetCol), targetSheet.Cells(nextRow - 1, currTargetCol))
+		sortRange.Sort sortRange.Cells(1,1), 1
+	End If
+
+	Dim tRow As Long, tCol As Integer
+
+	tRow = nextRow + 2
+
+	For i = freeSpace To nextRow - 1
+		For j = 2 To currTargetCol
+			tCol = i - freeSpace + 1
+			targetSheet.Cells(tRow + (j - 2), tCol + 1).Value = targetSheet.Cells(i,j).Value
+		Next j
+	Next i
+End Sub
+
+Sub ExtractFull(ByVal currItem As WorkbookItem, ByRef wb As Object, ByVal targetSheetName As String)
+	Dim spSheet As Spreadsheet
+	Set spSheet = currItem.Object
+
+	Dim targetSheet As Object
+	Set targetSheet = wb.Worksheets(targetSheetName)
+
+	Dim freeSpace As Long
+	freeSpace = targetSheet.Cells(targetSheet.Rows.Count, 2).End(-4162).Row + 3
+
+	spSheet.SelectAll
+	spSheet.CopyWithHeaders
+
+	targetSheet.Activate
+	targetSheet.Cells(freeSpace, 2).Select
+	targetSheet.Paste
+End Sub
+
+'STATISTICA MACRO FILE VERSION 4
+'BEGINPROPERTIES
+'NAME=ExcelExp
+'DESCRIPTION=
+'LANGUAGE=0
+'SCRIPTING=1
+'ENDPROPERTIES
